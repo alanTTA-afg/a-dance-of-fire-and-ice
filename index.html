@@ -2,47 +2,84 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>紅點生存戰</title>
+    <title>紅點生存戰 V2 - 階段進化版</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #1a1a1a;
-            font-family: 'Courier New', Courier, monospace;
-            cursor: none; /* 隱藏滑鼠游標，因為你會變成那個方塊 */
+            background-color: #111;
+            font-family: 'Arial Black', sans-serif;
+            cursor: none; /* 隱藏滑鼠 */
+            user-select: none; /* 禁止選取文字 */
         }
-        canvas {
-            display: block;
-        }
-        #ui {
+        canvas { display: block; }
+        
+        /* UI 介面層 */
+        #uiLayer {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            color: white;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             pointer-events: none; /* 讓滑鼠穿透 UI */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
         }
-        h1 { font-size: 40px; margin: 0; text-shadow: 0 0 10px red; }
-        p { font-size: 20px; color: #aaa; }
-        #scoreBoard {
+
+        /* 文字樣式 */
+        .hud-text {
             position: absolute;
-            top: 20px;
-            left: 20px;
             color: white;
-            font-size: 24px;
-            font-weight: bold;
-            pointer-events: none;
+            text-shadow: 2px 2px 0 #000;
+        }
+        #scoreDisplay { top: 20px; left: 20px; font-size: 24px; color: #0ff; }
+        #highScoreDisplay { top: 50px; left: 20px; font-size: 16px; color: #888; }
+        #stageDisplay { top: 20px; right: 20px; font-size: 30px; color: #ff0055; }
+        
+        /* 遊戲結束/開始選單 */
+        #menu {
+            text-align: center;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 40px;
+            border-radius: 10px;
+            border: 2px solid white;
+            pointer-events: auto; /* 選單需要可以點擊 */
+        }
+        h1 { margin: 0 0 20px 0; font-size: 50px; color: white; text-transform: uppercase; letter-spacing: 5px; }
+        p { color: #ccc; font-size: 18px; line-height: 1.6; }
+        .blink { animation: blinker 1s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0; } }
+
+        /* 階段提示特效 */
+        #stageAnnounce {
+            font-size: 80px;
+            color: yellow;
+            opacity: 0;
+            transform: scale(0.5);
+            transition: all 0.5s ease-out;
+            text-shadow: 0 0 20px orange;
+        }
+        .announce-active {
+            opacity: 1 !important;
+            transform: scale(1.2) !important;
         }
     </style>
 </head>
 <body>
 
-    <div id="scoreBoard">分數: 0</div>
+    <div id="uiLayer">
+        <div id="scoreDisplay" class="hud-text">TIME: 0.00s</div>
+        <div id="highScoreDisplay" class="hud-text">BEST: 0.00s</div>
+        <div id="stageDisplay" class="hud-text">STAGE 1</div>
+        <div id="stageAnnounce">STAGE UP!</div>
 
-    <div id="ui">
-        <h1 id="title">紅點生存戰</h1>
-        <p id="subtitle">移動滑鼠躲避紅色子彈<br>點擊滑鼠開始遊戲</p>
+        <div id="menu">
+            <h1>生存挑戰</h1>
+            <p>移動滑鼠躲避子彈<br>活得越久，難度越高</p>
+            <p class="blink" style="margin-top: 20px; color: #0ff;">[ 點擊滑鼠開始 ]</p>
+        </div>
     </div>
 
     <canvas id="gameCanvas"></canvas>
@@ -50,27 +87,48 @@
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-        const scoreEl = document.getElementById('scoreBoard');
-        const uiTitle = document.getElementById('title');
-        const uiSub = document.getElementById('subtitle');
+        const uiScore = document.getElementById('scoreDisplay');
+        const uiHighScore = document.getElementById('highScoreDisplay');
+        const uiStage = document.getElementById('stageDisplay');
+        const uiMenu = document.getElementById('menu');
+        const uiAnnounce = document.getElementById('stageAnnounce');
 
-        // 設定畫布全螢幕
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        // 自動全螢幕
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
 
-        // 玩家 (你)
-        const player = { x: canvas.width/2, y: canvas.height/2, size: 15, color: '#00ffff' };
-        
-        // 遊戲狀態
+        // 讀取最高分
+        let highScore = localStorage.getItem('survivalHighScore') || 0;
+        uiHighScore.innerText = `BEST: ${parseFloat(highScore).toFixed(2)}s`;
+
+        // 遊戲核心變數
+        const player = { x: 0, y: 0, size: 12, color: '#0ff', trail: [] };
         let enemies = [];
-        let particles = []; // 爆炸特效
-        let score = 0;
+        let particles = [];
         let gameRunning = false;
-        let spawnRate = 60; // 初始生怪速度 (幀數)
-        let frameCount = 0;
-        let difficultyMultiplier = 1;
+        let startTime = 0;
+        let currentTime = 0;
+        let animationId;
+        
+        // --- 階段設定 (這裡是控制難度的核心) ---
+        // time: 幾秒進入下一階
+        // spawnRate: 幾幀生一隻怪 (數字越小越快)
+        // speedMulti: 敵人速度倍率
+        // color: 敵人顏色
+        const stages = [
+            { id: 1, time: 0,  spawnRate: 40, speedMulti: 1.0, color: '#ff3333', name: "STAGE 1" },  // 初始
+            { id: 2, time: 10, spawnRate: 30, speedMulti: 1.5, color: '#aa33ff', name: "SPEED UP" }, // 10秒後：變快
+            { id: 3, time: 25, spawnRate: 15, speedMulti: 1.8, color: '#ff8800', name: "SWARM" },    // 25秒後：變多
+            { id: 4, time: 45, spawnRate: 10, speedMulti: 2.2, color: '#ffffff', name: "CHAOS" },    // 45秒後：地獄
+            { id: 5, time: 70, spawnRate: 6,  speedMulti: 2.8, color: '#ff0055', name: "NIGHTMARE"}  // 70秒後：惡夢
+        ];
+        let currentStageIndex = 0;
 
-        // 監聽滑鼠移動 (玩家跟隨滑鼠)
+        // 滑鼠控制
         window.addEventListener('mousemove', (e) => {
             if (gameRunning) {
                 player.x = e.clientX;
@@ -80,148 +138,197 @@
 
         // 點擊開始
         window.addEventListener('mousedown', () => {
-            if (!gameRunning) {
-                restartGame();
-            }
+            if (!gameRunning) startGame();
         });
 
-        function restartGame() {
+        function startGame() {
+            gameRunning = true;
+            uiMenu.style.display = 'none';
             enemies = [];
             particles = [];
-            score = 0;
-            spawnRate = 60;
-            difficultyMultiplier = 1;
-            gameRunning = true;
-            scoreEl.innerText = "分數: 0";
-            
-            // 隱藏標題
-            uiTitle.style.display = 'none';
-            uiSub.style.display = 'none';
-            
+            player.trail = [];
+            startTime = Date.now();
+            currentStageIndex = 0;
+            updateStageVisuals(stages[0]);
             animate();
         }
 
+        function updateStageVisuals(stage) {
+            uiStage.innerText = stage.name;
+            uiStage.style.color = stage.color;
+            
+            // 只有當不是第一關時，才顯示大字提示
+            if (stage.id > 1) {
+                uiAnnounce.innerText = stage.name + "!";
+                uiAnnounce.style.color = stage.color;
+                uiAnnounce.classList.add('announce-active');
+                setTimeout(() => {
+                    uiAnnounce.classList.remove('announce-active');
+                }, 1000);
+            }
+        }
+
         function createEnemy() {
-            const size = Math.random() * 15 + 10; // 隨機大小
+            const stage = stages[currentStageIndex];
+            const size = Math.random() * 10 + 8;
             let x, y;
             
-            // 從螢幕邊緣隨機生成
+            // 隨機邊緣生成
             if (Math.random() < 0.5) {
-                x = Math.random() < 0.5 ? 0 - size : canvas.width + size;
+                x = Math.random() < 0.5 ? -50 : canvas.width + 50;
                 y = Math.random() * canvas.height;
             } else {
                 x = Math.random() * canvas.width;
-                y = Math.random() < 0.5 ? 0 - size : canvas.height + size;
+                y = Math.random() < 0.5 ? -50 : canvas.height + 50;
             }
 
-            // 計算朝向玩家的角度
+            // 計算角度
             const angle = Math.atan2(player.y - y, player.x - x);
-            // 隨著分數提高，敵人速度變快
-            const velocity = {
-                x: Math.cos(angle) * (Math.random() * 2 + 2) * difficultyMultiplier,
-                y: Math.sin(angle) * (Math.random() * 2 + 2) * difficultyMultiplier
-            };
-
-            enemies.push({ x, y, velocity, size, color: `hsl(${Math.random()*50}, 100%, 50%)` });
+            // 速度根據階段變化
+            const speed = (Math.random() * 2 + 2) * stage.speedMulti;
+            
+            enemies.push({
+                x, y, 
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size, 
+                color: stage.color
+            });
         }
 
-        function createExplosion(x, y, color) {
-            for (let i = 0; i < 8; i++) {
+        function createParticles(x, y, color) {
+            for(let i=0; i<10; i++) {
                 particles.push({
-                    x: x, y: y,
-                    velocity: { x: (Math.random() - 0.5) * 5, y: (Math.random() - 0.5) * 5 },
-                    alpha: 1, color: color
+                    x, y,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: (Math.random() - 0.5) * 8,
+                    life: 1.0,
+                    color: color
                 });
             }
         }
 
-        function animate() {
-            if (!gameRunning) return;
-            requestAnimationFrame(animate);
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'; // 拖影效果
+        function gameOver() {
+            gameRunning = false;
+            cancelAnimationFrame(animationId);
+            
+            // 更新最高分
+            const finalScore = (currentTime / 1000);
+            if (finalScore > highScore) {
+                highScore = finalScore;
+                localStorage.setItem('survivalHighScore', highScore);
+                uiHighScore.innerText = `BEST: ${highScore.toFixed(2)}s`;
+            }
+
+            // 顯示選單
+            uiMenu.innerHTML = `
+                <h1 style="color:red">GAME OVER</h1>
+                <p>存活時間: <span style="color:white; font-size:24px">${finalScore.toFixed(2)}s</span></p>
+                <p>階段: ${stages[currentStageIndex].name}</p>
+                <p class="blink" style="margin-top:20px">[ 點擊重試 ]</p>
+            `;
+            uiMenu.style.display = 'block';
+            createParticles(player.x, player.y, '#0ff'); // 玩家爆炸特效
+            drawFrame(); // 畫最後一幀
+        }
+
+        function drawFrame() {
+            // 背景拖影效果 (讓移動有速度感)
+            ctx.fillStyle = 'rgba(17, 17, 17, 0.2)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 畫玩家
-            ctx.fillStyle = player.color;
-            ctx.beginPath();
-            ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
-            ctx.fill();
+            // 畫粒子
+            particles.forEach((p, i) => {
+                p.life -= 0.05;
+                p.x += p.vx;
+                p.y += p.vy;
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+                if(p.life <= 0) particles.splice(i, 1);
+            });
 
-            // 生成敵人邏輯
-            frameCount++;
-            if (frameCount % Math.floor(spawnRate) === 0) {
+            // 畫敵人
+            enemies.forEach(e => {
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = e.color;
+                ctx.fillStyle = e.color;
+                ctx.beginPath();
+                ctx.arc(e.x, e.y, e.size, 0, Math.PI*2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            });
+
+            // 畫玩家 (帶殘影)
+            player.trail.push({x: player.x, y: player.y});
+            if(player.trail.length > 5) player.trail.shift();
+            
+            player.trail.forEach((t, i) => {
+                ctx.fillStyle = `rgba(0, 255, 255, ${i/5})`;
+                ctx.beginPath();
+                ctx.arc(t.x, t.y, player.size * (i/5), 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            ctx.fillStyle = player.color;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#0ff';
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.size, 0, Math.PI*2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        function animate() {
+            if (!gameRunning) return;
+
+            // 計算時間
+            currentTime = Date.now() - startTime;
+            const seconds = currentTime / 1000;
+            uiScore.innerText = `TIME: ${seconds.toFixed(2)}s`;
+
+            // 檢查是否升級 (Stage Check)
+            const nextStage = stages[currentStageIndex + 1];
+            if (nextStage && seconds >= nextStage.time) {
+                currentStageIndex++;
+                updateStageVisuals(stages[currentStageIndex]);
+            }
+
+            // 敵人生成邏輯
+            const currentStageParams = stages[currentStageIndex];
+            // 使用 frame計數來決定生成頻率
+            if (Math.floor(seconds * 60) % currentStageParams.spawnRate === 0) {
                 createEnemy();
-                score++;
-                scoreEl.innerText = "分數: " + score;
+            }
+
+            // 更新敵人位置與碰撞
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const e = enemies[i];
+                e.x += e.vx;
+                e.y += e.vy;
+
+                // 碰撞檢測
+                const dx = player.x - e.x;
+                const dy = player.y - e.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
                 
-                // 難度曲線：每100分，生成變快，速度變快
-                if (score % 100 === 0) {
-                    if (spawnRate > 10) spawnRate -= 5;
-                    difficultyMultiplier += 0.1;
+                if (dist < player.size + e.size) {
+                    gameOver();
+                    return;
+                }
+
+                // 移除超出畫面的敵人
+                if (e.x < -100 || e.x > canvas.width+100 || e.y < -100 || e.y > canvas.height+100) {
+                    enemies.splice(i, 1);
                 }
             }
 
-            // 更新粒子 (爆炸特效)
-            particles.forEach((p, index) => {
-                if (p.alpha <= 0) {
-                    particles.splice(index, 1);
-                } else {
-                    p.velocity.x *= 0.95; // 摩擦力
-                    p.velocity.y *= 0.95;
-                    p.x += p.velocity.x;
-                    p.y += p.velocity.y;
-                    p.alpha -= 0.03;
-                    ctx.save();
-                    ctx.globalAlpha = p.alpha;
-                    ctx.fillStyle = p.color;
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
-                    ctx.fill();
-                    ctx.restore();
-                }
-            });
-
-            // 更新敵人
-            enemies.forEach((enemy, index) => {
-                enemy.x += enemy.velocity.x;
-                enemy.y += enemy.velocity.y;
-
-                // 畫敵人
-                ctx.fillStyle = enemy.color;
-                ctx.beginPath();
-                ctx.arc(enemy.x, enemy.y, enemy.size, 0, Math.PI * 2);
-                ctx.fill();
-
-                // 碰撞檢測 (距離公式)
-                const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-                
-                // 碰到就死
-                if (dist - enemy.size - player.size < 1) {
-                    gameOver();
-                }
-
-                // 移除超出螢幕太遠的敵人 (優化效能)
-                if (enemy.x < -100 || enemy.x > canvas.width + 100 || 
-                    enemy.y < -100 || enemy.y > canvas.height + 100) {
-                    enemies.splice(index, 1);
-                }
-            });
+            drawFrame();
+            animationId = requestAnimationFrame(animate);
         }
-
-        function gameOver() {
-            gameRunning = false;
-            createExplosion(player.x, player.y, 'cyan'); // 玩家爆炸
-            uiTitle.innerText = "遊戲結束";
-            uiSub.innerHTML = `最終分數: ${score}<br>點擊滑鼠重新開始`;
-            uiTitle.style.display = 'block';
-            uiSub.style.display = 'block';
-        }
-        
-        // 視窗調整時重設大小
-        window.addEventListener('resize', () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        });
 
     </script>
 </body>

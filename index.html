@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>我的網頁節奏遊戲</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #222; /* 深色背景 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: white;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        canvas {
+            background-color: #333;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="instructions">
+        <h1>按「空白鍵」或「點擊滑鼠」來切換圓心</h1>
+        <p>盡量不要讓球跑出畫面！</p>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- 遊戲參數 ---
+        const radius = 60; // 旋轉半徑
+        const speed = 0.05; // 旋轉速度 (數字越大轉越快)
+        const ballSize = 15; // 球的大小
+
+        // --- 遊戲狀態 ---
+        let angle = 0; // 目前角度
+        let pivot = { x: 400, y: 300 }; // 中心點(軸心)座標
+        let isRedPivot = true; // 誰是軸心？(紅球還是藍球)
+
+        // 遊戲主迴圈 (每一幀都會執行這裡)
+        function gameLoop() {
+            // 1. 清除畫面
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 2. 更新角度
+            angle += speed;
+
+            // 3. 計算「繞行球」的位置 (三角函數)
+            // 數學公式：x = 圓心x + 半徑 * cos(角度)
+            let orbiterX = pivot.x + Math.cos(angle) * radius;
+            let orbiterY = pivot.y + Math.sin(angle) * radius;
+
+            // 4. 繪製連接線
+            ctx.beginPath();
+            ctx.moveTo(pivot.x, pivot.y);
+            ctx.lineTo(orbiterX, orbiterY);
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 5. 繪製中心球 (軸心)
+            ctx.beginPath();
+            ctx.arc(pivot.x, pivot.y, ballSize, 0, Math.PI * 2);
+            ctx.fillStyle = isRedPivot ? 'red' : 'cyan'; // 紅色或青色
+            ctx.fill();
+
+            // 6. 繪製繞行球
+            ctx.beginPath();
+            ctx.arc(orbiterX, orbiterY, ballSize, 0, Math.PI * 2);
+            ctx.fillStyle = isRedPivot ? 'cyan' : 'red'; // 跟軸心顏色相反
+            ctx.fill();
+
+            // 7. 請求下一幀動畫
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- 控制機制 ---
+        function switchPivot() {
+            // 計算目前繞行球的位置
+            let currentOrbiterX = pivot.x + Math.cos(angle) * radius;
+            let currentOrbiterY = pivot.y + Math.sin(angle) * radius;
+
+            // 【核心邏輯】：舊的繞行球，變成新的中心點
+            pivot.x = currentOrbiterX;
+            pivot.y = currentOrbiterY;
+
+            // 角度要加 180度 (Math.PI)，這樣切換時才會看起來順暢連貫
+            angle = angle + Math.PI;
+
+            // 交換顏色狀態
+            isRedPivot = !isRedPivot;
+        }
+
+        // 監聽鍵盤 (空白鍵)
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                switchPivot();
+            }
+        });
+
+        // 監聽滑鼠點擊
+        document.addEventListener('mousedown', () => {
+            switchPivot();
+        });
+
+        // 啟動遊戲
+        gameLoop();
+
+    </script>
+</body>
+</html>
